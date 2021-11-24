@@ -1,0 +1,189 @@
+---
+title: "Projet de VDD"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook: default
+---
+
+
+```{r}
+library(vcd)
+library(car)
+library(corrgram)
+library(Hmisc)
+library(glmnet)
+
+```
+```{r}
+base<-read.csv("~/RR/Admission_Predict.csv")
+head(base)
+```
+
+
+```{r}
+states<-base[,c(2:9)]
+head(states)
+```
+
+
+```{r}
+attach(states)
+FillNA <- function(x){
+  x[is.na(x )]<- mode(x);
+  x
+}
+```
+
+
+```{r}
+par(mfrow = c(2, 4))
+for (i in 2:9){
+  FillNA(colnames(base)[i])
+  hist(base[,c(i)],xlab=colnames(base)[i],
+       main=paste("Histogram of",colnames(base)[i]))
+}
+```
+
+
+```{r}
+par(mfrow = c(1, 2))
+boxplot(Chance.of.Admit~Research,data=states)
+boxplot(Chance.of.Admit~University.Rating,data=states)
+```
+Ci-dessus, nous pouvons conclure que la relation entre le taux d’admission et tous les paramètres est presque linéaire, il n’y a pas de tendance à changer de façon exponentielle, de sorte que la relation entre le taux d’admission et le rendement des élèves peut être simulée par le modèle linéaire de régression multiple
+
+```{r}
+par(mfrow = c(2, 4))
+plot(GRE.Score,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~GRE.Score),col="red",lwd=2,lty=1)
+lines(lowess(GRE.Score,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(TOEFL.Score,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~TOEFL.Score),col="red",lwd=2,lty=1)
+lines(lowess(TOEFL.Score,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(University.Rating,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~University.Rating),col="red",lwd=2,lty=1)
+lines(lowess(University.Rating,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(SOP,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~SOP),col="red",lwd=2,lty=1)
+lines(lowess(SOP,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(LOR,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~LOR),col="red",lwd=2,lty=1)
+lines(lowess(LOR,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(CGPA,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~CGPA),col="red",lwd=2,lty=1)
+lines(lowess(CGPA,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+```
+```{r}
+options(digits=2)
+res<-rcorr(as.matrix(states))
+res$r
+```
+
+
+```{r}
+par(mfrow = c(1, 2))
+boxplot(Chance.of.Admit~Research,data=states)
+
+boxplot(Chance.of.Admit~University.Rating,data=states)
+
+```
+```{r}
+corrgram(states,order=TRUE,lower.panel=panel.shade,upper.panel=panel.pie,text.panel=panel.txt)
+```
+
+
+```{r}
+model_lm <- lm(Chance.of.Admit~., data =states)
+summary(model_lm)
+```
+
+Ici, nous pouvons voir qu’il n’y a pas de collinearity complète entre les propriétés, mais certaines propriétés ont une forte corrélation avant, ce qui peut causer l’erreur carrée moyenne MSE est trop grande, et puis nous allons utiliser la régression de crête et la régression lasso pour essayer de résoudre ce problème
+Formule de régression$$Chance of admit=0.0017*GRE+0.0029*TOEFL+0.0057*UNV-rat-0.0033*SOP+0.022*LOR+0.12*CGPA+0.024*Res-1.26$$
+```{r}
+x <- model.matrix(Chance.of.Admit~., states)[,-1]
+y <- Chance.of.Admit
+lam <- 10^seq(10, -2, length = 100)
+
+model_rid <- glmnet(x, y, alpha = 0, lambda = lam)
+coef.glmnet(model_rid)
+
+```
+Ensuite, nous utilisons le modèle de régression de crête, et étudions la précision des valeurs différentes a-take lorsque le modèle de régression de crête, au-dessus d’une prise de 100 valeurs différentes lorsque les paramètres du modèle
+
+```{r}
+model_rid
+```
+```{r}
+set.seed(16124706)
+train = sample(1:nrow(x), nrow(x)*2/3)
+test = (-train)
+ytest = y[test]
+Chance.of.Admitlm <- lm(Chance.of.Admit~., data = states, subset = train)
+ridge.mod <- glmnet(x[train,], y[train], alpha = 0, lambda = lam)
+cv.out <- cv.glmnet(x[train,], y[train], alpha = 0)
+plot(cv.out)
+```
+On peut voir que changer la valeur lamda ne change pas le nombre de rangs de la matrice x du modèle calculé, x a toujours été une matrice de rang complet, et puis nous étudierons la comparaison entre le MSE des deux modèles de régression et le MAE et le modèle ordinaire pour obtenir le modèle optimal
+
+```{r}
+set.seed(16124706)
+train = sample(1:nrow(x), nrow(x)*2/3)
+test = (-train)
+ytest = y[test]
+Chance.of.Admitlm <- lm(Chance.of.Admit~., data = states, subset = train)
+ridge.mod <- glmnet(x[train,], y[train], alpha = 0, lambda = lam)
+cv.out <- cv.glmnet(x[train,], y[train], alpha = 0)
+bestlam <- cv.out$lambda.min
+ridge.pred <- predict(ridge.mod, s = bestlam, newx = x[test,])
+s.pred <- predict(Chance.of.Admitlm, newdata = states[test,])
+mean((s.pred-ytest)^2)
+mean((ridge.pred-ytest)^2)
+mean(s.pred-ytest)
+mean(ridge.pred-ytest)
+```
+Modèle ordinaire MSE est 0,0033, MAE est 0,0042, Ridge modèle de régression MAE est 0,0042, MSE est de 0,0043
+```{r}
+out = cv.glmnet(x[train,],y[train],alpha = 1)
+bestlam <- out$lambda.min
+predict(ridge.mod, type = "coefficients", s = bestlam)[1:6,]
+model_las <- glmnet(x[train,], y[train], alpha = 1, lambda = lam)
+pred_las <- predict(model_las, s = bestlam, newx = x[test,])
+mean((pred_las-ytest)^2)
+mean(pred_las-ytest)
+```
+Modèle de régression Lasso MSE=0,0042, MAE=0,0044. De là, nous pouvons conclure que le modèle normal minimum de diassolication est le modèle de régression le plus approprié pour cet ensemble de données
+
+Voici quelques exemples d’entrée et de sortie
+```{r}
+new1<-data.frame(t(x[5,1:7]))
+lm.pred<-predict(model_lm,new1,interval = 'prediction',level=0.95)
+lm.pred
+```
+
+```{r}
+new1<-data.frame(t(x[20,1:7]))
+lm.pred<-predict(model_lm,new1,interval = 'prediction',level=0.95)
+lm.pred
+```
+Par conséquent, le taux d’admission des étudiants devrait être de 0,64 et il y a 95 % de chances que la fourchette soit de 0,51 à 0,76. Dans l’ensemble de données, le taux d’admission réel de cet étudiant est de 0,65
+```{r}
+new1<-data.frame(t(x[50,1:7]))
+lm.pred<-predict(model_lm,new1,interval = 'prediction',level=0.95)
+lm.pred
+```
+Par conséquent, le taux d’admission des étudiants devrait être de 0,76, et il y a 95 % de chances qu’il se trouve dans la fourchette de 0,63 à 0,89. Dans l’ensemble de données, le taux d’admission réel de cet étudiant est de 0,78
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

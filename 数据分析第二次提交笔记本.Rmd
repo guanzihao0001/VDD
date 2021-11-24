@@ -1,0 +1,189 @@
+---
+title: "Projet de VDD"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook: default
+---
+
+
+```{r}
+library(vcd)
+library(car)
+library(corrgram)
+library(Hmisc)
+library(glmnet)
+
+```
+```{r}
+base<-read.csv("~/RR/Admission_Predict.csv")
+head(base)
+```
+
+
+```{r}
+states<-base[,c(2:9)]
+head(states)
+```
+
+
+```{r}
+attach(states)
+FillNA <- function(x){
+  x[is.na(x )]<- mode(x);
+  x
+}
+```
+
+
+```{r}
+par(mfrow = c(2, 4))
+for (i in 2:9){
+  FillNA(colnames(base)[i])
+  hist(base[,c(i)],xlab=colnames(base)[i],
+       main=paste("Histogram of",colnames(base)[i]))
+}
+```
+
+
+```{r}
+par(mfrow = c(1, 2))
+boxplot(Chance.of.Admit~Research,data=states)
+boxplot(Chance.of.Admit~University.Rating,data=states)
+```
+以上我们可以得出录取率与所有参数之间的关系几乎都是线性变化的，没有指数变化的趋势，所以可以用多元回归的线性模型来模拟录取率与学生成绩的关系
+
+```{r}
+par(mfrow = c(2, 4))
+plot(GRE.Score,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~GRE.Score),col="red",lwd=2,lty=1)
+lines(lowess(GRE.Score,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(TOEFL.Score,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~TOEFL.Score),col="red",lwd=2,lty=1)
+lines(lowess(TOEFL.Score,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(University.Rating,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~University.Rating),col="red",lwd=2,lty=1)
+lines(lowess(University.Rating,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(SOP,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~SOP),col="red",lwd=2,lty=1)
+lines(lowess(SOP,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(LOR,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~LOR),col="red",lwd=2,lty=1)
+lines(lowess(LOR,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+plot(CGPA,Chance.of.Admit,pch=19)
+abline(lm(Chance.of.Admit~CGPA),col="red",lwd=2,lty=1)
+lines(lowess(CGPA,Chance.of.Admit),col="blue",lwd=2,lty=2)
+
+```
+```{r}
+options(digits=2)
+res<-rcorr(as.matrix(states))
+res$r
+```
+
+
+```{r}
+par(mfrow = c(1, 2))
+boxplot(Chance.of.Admit~Research,data=states)
+
+boxplot(Chance.of.Admit~University.Rating,data=states)
+
+```
+```{r}
+corrgram(states,order=TRUE,lower.panel=panel.shade,upper.panel=panel.pie,text.panel=panel.txt)
+```
+这里我们可以看出各个属性之间不存在完全的共线性，但一些属性之前还是存在很强的相关性，这可能会造成均方误差MSE过大，之后我们将使用岭回归和lasso回归尝试解决这个问题
+
+```{r}
+model_lm <- lm(Chance.of.Admit~., data =states)
+summary(model_lm)
+```
+
+以上是经过线性回归后模型各个参数的值，我们可以看到对于大部分参数来说t检验的p值都位于合理范围内，除了学生的大学等级和SOP绩点，也就是说模型对这两个属性变化时预测的准确程度不高
+回归公式$$Chance of admit=0.0017*GRE+0.0029*TOEFL+0.0057*UNV-rat-0.0033*SOP+0.022*LOR+0.12*CGPA+0.024*Res-1.26$$
+```{r}
+x <- model.matrix(Chance.of.Admit~., states)[,-1]
+y <- Chance.of.Admit
+lam <- 10^seq(10, -2, length = 100)
+
+model_rid <- glmnet(x, y, alpha = 0, lambda = lam)
+coef.glmnet(model_rid)
+
+```
+
+接下来我们使用岭回归模型，并且研究a取不同值时岭回归模型的准确程度，以上是a取100个不同值时模型的各个参数
+```{r}
+model_rid
+```
+```{r}
+set.seed(16124706)
+train = sample(1:nrow(x), nrow(x)*2/3)
+test = (-train)
+ytest = y[test]
+Chance.of.Admitlm <- lm(Chance.of.Admit~., data = states, subset = train)
+ridge.mod <- glmnet(x[train,], y[train], alpha = 0, lambda = lam)
+cv.out <- cv.glmnet(x[train,], y[train], alpha = 0)
+plot(cv.out)
+```
+可以看出，改变lamda值并没有使计算模型的x矩阵秩数变化，x一直是满秩矩阵，接下来我们将研究两种回归模型的MSE与MAE和普通模型的比较，得到最优模型
+
+```{r}
+set.seed(16124706)
+train = sample(1:nrow(x), nrow(x)*2/3)
+test = (-train)
+ytest = y[test]
+Chance.of.Admitlm <- lm(Chance.of.Admit~., data = states, subset = train)
+ridge.mod <- glmnet(x[train,], y[train], alpha = 0, lambda = lam)
+cv.out <- cv.glmnet(x[train,], y[train], alpha = 0)
+bestlam <- cv.out$lambda.min
+ridge.pred <- predict(ridge.mod, s = bestlam, newx = x[test,])
+s.pred <- predict(Chance.of.Admitlm, newdata = states[test,])
+mean((s.pred-ytest)^2)
+mean((ridge.pred-ytest)^2)
+mean(s.pred-ytest)
+mean(ridge.pred-ytest)
+```
+普通模型MSE=0.0033，MAE=0.0042，岭回归模型MAE=0.0042，MSE=0.0043
+```{r}
+out = cv.glmnet(x[train,],y[train],alpha = 1)
+bestlam <- out$lambda.min
+predict(ridge.mod, type = "coefficients", s = bestlam)[1:6,]
+model_las <- glmnet(x[train,], y[train], alpha = 1, lambda = lam)
+pred_las <- predict(model_las, s = bestlam, newx = x[test,])
+mean((pred_las-ytest)^2)
+mean(pred_las-ytest)
+```
+lasso回归模型MSE=0.0042，MAE=0.0044。由此我们可以得出，普通最小二乘法模型是最适合此数据集的回归模型
+
+以下是一些输入输出的例子
+```{r}
+new1<-data.frame(t(x[5,1:7]))
+lm.pred<-predict(model_lm,new1,interval = 'prediction',level=0.95)
+lm.pred
+```
+由此得出此学生录取率期望为0.64，并有95%几率在0.51-0.76的范围中。在数据集中，此学生的实际录取率为0.65
+```{r}
+new1<-data.frame(t(x[20,1:7]))
+lm.pred<-predict(model_lm,new1,interval = 'prediction',level=0.95)
+lm.pred
+```
+由此得出此学生录取率期望为0.65，并有95%几率在0.52-0.77的范围中。在数据集中，此学生的实际录取率为0.62
+```{r}
+new1<-data.frame(t(x[50,1:7]))
+lm.pred<-predict(model_lm,new1,interval = 'prediction',level=0.95)
+lm.pred
+```
+由此得出此学生录取率期望为0.76，并有95%几率在0.63-0.89的范围中。在数据集中，此学生的实际录取率为0.78
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
